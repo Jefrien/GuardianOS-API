@@ -3,10 +3,12 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { cors } from "hono/cors";
+import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { readFile, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { randomBytes } from "crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, "..", "data");
@@ -14,9 +16,41 @@ const CONFIG_PATH = join(DATA_DIR, "config.json");
 const USAGE_PATH = join(DATA_DIR, "usage.json");
 const PUBLIC_DIR = join(__dirname, "..", "public");
 
+// ---------- GESTIÓN DE SESIONES ----------
+
+const SESSION_MINUTES = parseInt(process.env.SESSION_MINUTES || "120");
+const sessions = new Map(); // token -> { expiresAt: number }
+
+function createSession() {
+  const token = randomBytes(32).toString("hex");
+  sessions.set(token, { expiresAt: Date.now() + SESSION_MINUTES * 60_000 });
+  return token;
+}
+
+function isValidSession(token) {
+  if (!token) return false;
+  const s = sessions.get(token);
+  if (!s) return false;
+  if (Date.now() > s.expiresAt) {
+    sessions.delete(token);
+    return false;
+  }
+  // Sliding window: renovar en cada acceso válido
+  s.expiresAt = Date.now() + SESSION_MINUTES * 60_000;
+  return true;
+}
+
+// Limpiar sesiones expiradas cada 5 minutos
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of sessions) if (now > v.expiresAt) sessions.delete(k);
+}, 5 * 60_000);
+
+// ---------- APP ----------
+
 const app = new Hono();
 
-// CORS abierto para que el servicio .NET pueda llamar desde cualquier lado
+// 1. CORS abierto para que el servicio .NET pueda llamar desde cualquier lado
 app.use(
   "*",
   cors({
@@ -26,19 +60,45 @@ app.use(
   }),
 );
 
-// Middleware de API Key opcional (activar en VPS via env var API_KEY)
+// 2. Middleware de autenticación combinado (API Key + sesión de dashboard)
+const PROTECTED = [
+  "/config",
+  "/usage",
+  "/setTime",
+  "/setEnabled",
+  "/setMessage",
+  "/syncTime",
+];
+
 app.use("*", async (c, next) => {
+  const path = c.req.path;
+
+  // Siempre públicas
+  if (["/login", "/logout", "/session", "/health"].includes(path))
+    return next();
+
+  // Solo proteger rutas de API
+  const isApiRoute = PROTECTED.some(
+    (p) => path === p || path.startsWith(p + "/"),
+  );
+  if (!isApiRoute) return next();
+
+  const adminToken = process.env.ADMIN_TOKEN;
+  // Si no hay ADMIN_TOKEN configurado, sin auth (retrocompat)
+  if (!adminToken) return next();
+
+  // API key del servicio externo (.NET)
   const apiKey = process.env.API_KEY;
-  if (apiKey) {
-    const provided = c.req.header("x-api-key");
-    if (provided !== apiKey) {
-      return c.json({ success: false, error: "Unauthorized" }, 401);
-    }
-  }
-  await next();
+  if (apiKey && c.req.header("x-api-key") === apiKey) return next();
+
+  // Cookie de sesión del dashboard
+  const sessionToken = getCookie(c, "session");
+  if (isValidSession(sessionToken)) return next();
+
+  return c.json({ success: false, error: "Unauthorized" }, 401);
 });
 
-// Middleware de log simple
+// 3. Middleware de log simple
 app.use("*", async (c, next) => {
   const start = Date.now();
   await next();
@@ -46,7 +106,8 @@ app.use("*", async (c, next) => {
   console.log(`${c.req.method} ${c.req.url} - ${c.res.status} (${ms}ms)`);
 });
 
-// Helpers de persistencia
+// ---------- HELPERS DE PERSISTENCIA ----------
+
 async function readJson(path, fallback = {}) {
   try {
     if (!existsSync(path)) return fallback;
@@ -71,7 +132,48 @@ async function writeJson(path, data) {
   }
 }
 
-// ---------- CONFIG ----------
+// ---------- 4. AUTENTICACIÓN DEL DASHBOARD ----------
+
+// GET /session - verificar si la sesión activa es válida
+app.get("/session", (c) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) return c.json({ valid: true }); // sin auth configurada
+  const token = getCookie(c, "session");
+  return c.json({ valid: isValidSession(token) });
+});
+
+// POST /login - { token: string } -> { success: boolean }
+app.post("/login", async (c) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken)
+    return c.json({ success: false, error: "Auth no configurada" }, 500);
+  try {
+    const { token } = await c.req.json();
+    if (!token || token !== adminToken) {
+      return c.json({ success: false, error: "Token inválido" }, 401);
+    }
+    const sessionToken = createSession();
+    setCookie(c, "session", sessionToken, {
+      httpOnly: true,
+      sameSite: "Strict",
+      path: "/",
+      maxAge: SESSION_MINUTES * 60,
+    });
+    return c.json({ success: true, expiresInMinutes: SESSION_MINUTES });
+  } catch (e) {
+    return c.json({ success: false, error: e.message }, 400);
+  }
+});
+
+// POST /logout
+app.post("/logout", (c) => {
+  const token = getCookie(c, "session");
+  if (token) sessions.delete(token);
+  deleteCookie(c, "session", { path: "/" });
+  return c.json({ success: true });
+});
+
+// ---------- 5. CONFIG ----------
 
 app.get("/config", async (c) => {
   const config = await readJson(CONFIG_PATH);
@@ -189,7 +291,7 @@ app.get("/health", (c) =>
   c.json({ status: "ok", timestamp: new Date().toISOString() }),
 );
 
-// ---------- STATIC / DASHBOARD ----------
+// ---------- 6. STATIC / DASHBOARD ----------
 
 app.use("/*", serveStatic({ root: PUBLIC_DIR }));
 app.get("/", async (c) => {
@@ -212,16 +314,6 @@ const server = serve({
 });
 
 console.log(`[KidsMonitor API] corriendo en http://localhost:${PORT}`);
-
-process.on("SIGINT", () => {
-  console.log("\n[KidsMonitor API] Cerrando servidor...");
-  server.close(() => process.exit(0));
-});
-
-process.on("SIGTERM", () => {
-  console.log("\n[KidsMonitor API] Cerrando servidor...");
-  server.close(() => process.exit(0));
-});
 console.log(`  GET  /config       -> ver configuracion`);
 console.log(`  POST /config       -> actualizar config completo`);
 console.log(`  POST /setTime      -> body: { timeLimitMinutes: number }`);
@@ -232,3 +324,16 @@ console.log(
 );
 console.log(`  GET  /usage        -> ver ultimo tiempo sincronizado`);
 console.log(`  GET  /health       -> healthcheck`);
+console.log(`  GET  /session      -> verificar sesion activa`);
+console.log(`  POST /login        -> body: { token: string }`);
+console.log(`  POST /logout       -> cerrar sesion`);
+
+process.on("SIGINT", () => {
+  console.log("\n[KidsMonitor API] Cerrando servidor...");
+  server.close(() => process.exit(0));
+});
+
+process.on("SIGTERM", () => {
+  console.log("\n[KidsMonitor API] Cerrando servidor...");
+  server.close(() => process.exit(0));
+});

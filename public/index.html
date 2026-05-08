@@ -272,6 +272,7 @@
             headers: { "Content-Type": "application/json", ...options.headers },
             ...options,
           });
+          if (res.status === 401) return { __unauthorized: true };
           return await res.json();
         } catch (e) {
           console.error("API Error:", e);
@@ -312,7 +313,7 @@
         `;
       }
 
-      function MainHeader({ status }) {
+      function MainHeader({ status, onLogout }) {
         const dotColor =
           status === "Conectado"
             ? "bg-emerald-400 pulse-dot"
@@ -350,6 +351,13 @@
               <span class=${`text-xs font-medium ${labelColor}`}
                 >${status}</span
               >
+              <button
+                onClick=${onLogout}
+                title="Cerrar sesión"
+                class="ml-3 w-8 h-8 rounded-xl glass flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all"
+              >
+                <i class="fa-solid fa-arrow-right-from-bracket text-xs"></i>
+              </button>
             </div>
           </header>
         `;
@@ -917,6 +925,94 @@
         `;
       }
 
+      function LoginScreen({ onLogin }) {
+        const [token, setToken] = useState("");
+        const [loading, setLoading] = useState(false);
+        const [error, setError] = useState("");
+
+        const handleSubmit = async (e) => {
+          e.preventDefault();
+          if (!token.trim()) return;
+          setLoading(true);
+          setError("");
+          const res = await apiFetch("/login", {
+            method: "POST",
+            body: JSON.stringify({ token: token.trim() }),
+          });
+          setLoading(false);
+          if (res?.success) {
+            onLogin();
+          } else {
+            setError(res?.error || "Token inválido");
+            setToken("");
+          }
+        };
+
+        return html`
+          <div class="min-h-screen flex items-center justify-center p-4">
+            <div
+              class="glass-card rounded-3xl p-8 w-full max-w-[380px] shadow-2xl"
+            >
+              <div class="text-center mb-8">
+                <div
+                  class="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400 flex items-center justify-center text-white text-2xl shadow-lg shadow-violet-200 mx-auto mb-4"
+                >
+                  <i class="fa-solid fa-shield"></i>
+                </div>
+                <h1 class="text-xl font-bold text-slate-800">GuardianOS</h1>
+                <p class="text-xs text-slate-400 mt-1">
+                  Ingresa tu token de acceso para continuar
+                </p>
+              </div>
+
+              <form onSubmit=${handleSubmit} class="space-y-4">
+                <div class="relative">
+                  <i
+                    class="fa-solid fa-key absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm"
+                  ></i>
+                  <input
+                    type="password"
+                    placeholder="Token de administrador"
+                    value=${token}
+                    onInput=${(e) => {
+                      setToken(e.target.value);
+                      setError("");
+                    }}
+                    autocomplete="current-password"
+                    class="w-full rounded-xl bg-white/40 border border-white/60 pl-10 pr-4 py-3 text-sm text-slate-700 outline-none focus:border-violet-300 focus:ring-2 focus:ring-violet-100 transition-all placeholder-slate-400"
+                  />
+                </div>
+
+                ${error &&
+                html`
+                  <div
+                    class="flex items-center gap-2 px-3 py-2 rounded-xl bg-rose-50 border border-rose-100"
+                  >
+                    <i
+                      class="fa-solid fa-circle-exclamation text-rose-400 text-xs"
+                    ></i>
+                    <p class="text-xs text-rose-500">${error}</p>
+                  </div>
+                `}
+
+                <button
+                  type="submit"
+                  disabled=${loading || !token.trim()}
+                  class="w-full py-3 rounded-xl bg-gradient-to-r from-violet-500 to-cyan-500 text-white text-sm font-semibold shadow-lg shadow-violet-200 hover:shadow-xl hover:shadow-violet-200 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  ${loading
+                    ? html`<span class="flex items-center justify-center gap-2"
+                        ><i class="fa-solid fa-circle-notch fa-spin"></i>
+                        Verificando...</span
+                      >`
+                    : "Entrar al Dashboard"}
+                </button>
+              </form>
+            </div>
+          </div>
+        `;
+      }
+
       function Footer() {
         return html`
           <div class="text-center py-6 text-xs text-slate-400">
@@ -936,6 +1032,7 @@
           type: "success",
           visible: false,
         });
+        const [authenticated, setAuthenticated] = useState(null);
 
         const showToast = useCallback((message, type = "success") => {
           setToast({ message, type, visible: true });
@@ -950,6 +1047,11 @@
           ]);
 
           setLoading(false);
+
+          if (configData?.__unauthorized) {
+            setAuthenticated(false);
+            return;
+          }
 
           if (!configData) {
             setStatus("Desconectado");
@@ -967,6 +1069,12 @@
           const interval = setInterval(loadData, 10000);
           return () => clearInterval(interval);
         }, [loadData]);
+
+        useEffect(() => {
+          apiFetch("/session").then((res) => {
+            setAuthenticated(res?.valid ?? false);
+          });
+        }, []);
 
         const handleToggleEnabled = useCallback(
           async (e) => {
@@ -1036,6 +1144,13 @@
           [showToast, loadData],
         );
 
+        const handleLogout = useCallback(async () => {
+          await apiFetch("/logout", { method: "POST" });
+          setAuthenticated(false);
+          setConfig({});
+          setUsage({});
+        }, []);
+
         const limit = config.TimeLimitMinutes || 0;
         const used = usage.elapsedMinutes || 0;
         const remaining = Math.max(0, limit - used);
@@ -1053,13 +1168,26 @@
               ? "Casi agotado"
               : "Disponible";
 
+        if (authenticated === null) {
+          return html`<${LoadingOverlay} visible=${true} />`;
+        }
+
+        if (!authenticated) {
+          return html`<${LoginScreen}
+            onLogin=${() => {
+              setAuthenticated(true);
+              loadData();
+            }}
+          />`;
+        }
+
         return html`
         <${Fragment}>
           <${LoadingOverlay} visible=${loading} />
 
           <main class="px-4 md:px-8 py-4 md:py-6 max-w-[1400px] mx-auto">
 
-            <${MainHeader} status=${status} />
+            <${MainHeader} status=${status} onLogout=${handleLogout} />
 
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
               <${StatCard}
