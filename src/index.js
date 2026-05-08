@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { cors } from "hono/cors";
 import { readFile, writeFile } from "fs/promises";
 import { existsSync } from "fs";
@@ -11,6 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, "..", "data");
 const CONFIG_PATH = join(DATA_DIR, "config.json");
 const USAGE_PATH = join(DATA_DIR, "usage.json");
+const PUBLIC_DIR = join(__dirname, "..", "public");
 
 const app = new Hono();
 
@@ -186,6 +188,19 @@ app.get("/usage", async (c) => {
 app.get("/health", (c) =>
   c.json({ status: "ok", timestamp: new Date().toISOString() }),
 );
+
+// ---------- STATIC / DASHBOARD ----------
+
+app.use("/*", serveStatic({ root: PUBLIC_DIR }));
+app.get("/", async (c) => {
+  const indexPath = join(PUBLIC_DIR, "index.html");
+  try {
+    const html = await readFile(indexPath, "utf-8");
+    return c.html(html);
+  } catch {
+    return c.text("Dashboard no encontrado", 404);
+  }
+});
 
 // ---------- START ----------
 

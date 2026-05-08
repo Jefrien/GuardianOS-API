@@ -1,0 +1,1136 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GuardianOS Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+    />
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: { sans: ["Inter", "sans-serif"] },
+            colors: {
+              primary: "#8B5CF6",
+              secondary: "#06B6D4",
+              accent: "#F472B6",
+              success: "#10B981",
+              warning: "#F59E0B",
+              danger: "#EF4444",
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      .loading-overlay {
+        position: fixed;
+        inset: 0;
+        background: linear-gradient(
+          135deg,
+          #e0e7ff 0%,
+          #f5e6ff 25%,
+          #fdf2f8 50%,
+          #e0f2fe 75%,
+          #ccfbf1 100%
+        );
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 1rem;
+        transition:
+          opacity 0.5s ease,
+          visibility 0.5s ease;
+      }
+      .loading-overlay.hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+      .spinner {
+        width: 48px;
+        height: 48px;
+        border: 3px solid rgba(139, 92, 246, 0.2);
+        border-top-color: #8b5cf6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      body {
+        font-family: "Inter", sans-serif;
+        background: linear-gradient(
+          135deg,
+          #e0e7ff 0%,
+          #f5e6ff 25%,
+          #fdf2f8 50%,
+          #e0f2fe 75%,
+          #ccfbf1 100%
+        );
+        min-height: 100vh;
+      }
+      .glass {
+        background: rgba(255, 255, 255, 0.45);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.6);
+      }
+      .glass-card {
+        background: rgba(255, 255, 255, 0.5);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        transition: all 0.3s ease;
+      }
+      .glass-card:hover {
+        background: rgba(255, 255, 255, 0.65);
+        transform: translateY(-2px);
+        box-shadow: 0 12px 40px rgba(139, 92, 246, 0.1);
+      }
+      .glass-dark {
+        background: rgba(30, 30, 40, 0.7);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .toggle-switch {
+        appearance: none;
+        width: 44px;
+        height: 24px;
+        background: #cbd5e1;
+        border-radius: 999px;
+        position: relative;
+        cursor: pointer;
+        transition: background 0.3s ease;
+      }
+      .toggle-switch::after {
+        content: "";
+        position: absolute;
+        width: 20px;
+        height: 20px;
+        background: white;
+        border-radius: 50%;
+        top: 2px;
+        left: 2px;
+        transition: transform 0.3s ease;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      .toggle-switch:checked {
+        background: linear-gradient(135deg, #8b5cf6, #06b6d4);
+      }
+      .toggle-switch:checked::after {
+        transform: translateX(20px);
+      }
+      .stat-icon {
+        width: 44px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 14px;
+      }
+      .gradient-text {
+        background: linear-gradient(135deg, #8b5cf6, #06b6d4);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .preset-card {
+        transition: all 0.3s ease;
+        cursor: pointer;
+      }
+      .preset-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+      }
+      @keyframes pulse-dot {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+      .pulse-dot {
+        animation: pulse-dot 2s infinite;
+      }
+      .chart-container {
+        position: relative;
+        height: 260px;
+      }
+      .circular-chart {
+        width: 180px;
+        height: 180px;
+      }
+      .circular-chart circle {
+        transition: stroke-dashoffset 1s ease;
+      }
+    </style>
+  </head>
+  <body class="text-slate-700 antialiased">
+    <div id="app"></div>
+
+    <script type="module">
+      import { h, render, Fragment } from "https://esm.sh/preact@10";
+      import {
+        useState,
+        useEffect,
+        useRef,
+        useCallback,
+      } from "https://esm.sh/preact@10/hooks";
+      import htm from "https://esm.sh/htm@3";
+      const html = htm.bind(h);
+
+      const PRESETS = {
+        school: {
+          time: 60,
+          enabled: true,
+          message:
+            "¡Se acabó el tiempo de pantalla por hoy! Tiempo escolar finalizado.",
+        },
+        weekend: {
+          time: 120,
+          enabled: true,
+          message: "¡Fin de semana terminado! Descansa para mañana.",
+        },
+        strict: {
+          time: 30,
+          enabled: true,
+          message: "Tiempo agotado. Modo estricto activado.",
+        },
+        free: {
+          time: 180,
+          enabled: false,
+          message: "¡Se acabó el tiempo libre!",
+        },
+      };
+
+      const PRESET_UI = [
+        {
+          key: "school",
+          label: "Día Escolar",
+          sub: "60 min, estricto",
+          icon: "fa-graduation-cap",
+          bg: "from-blue-50 to-indigo-50 border-blue-100",
+          iconBg: "bg-blue-500",
+        },
+        {
+          key: "weekend",
+          label: "Fin de Semana",
+          sub: "120 min, relajado",
+          icon: "fa-gamepad",
+          bg: "from-violet-50 to-purple-50 border-violet-100",
+          iconBg: "bg-violet-500",
+        },
+        {
+          key: "strict",
+          label: "Modo Estricto",
+          sub: "30 min, sin excepciones",
+          icon: "fa-lock",
+          bg: "from-emerald-50 to-teal-50 border-emerald-100",
+          iconBg: "bg-emerald-500",
+        },
+        {
+          key: "free",
+          label: "Tiempo Libre",
+          sub: "180 min, flexible",
+          icon: "fa-unlock",
+          bg: "from-amber-50 to-orange-50 border-amber-100",
+          iconBg: "bg-amber-500",
+        },
+      ];
+
+      const QUICK_MESSAGES = {
+        default: "¡Se acabó el tiempo de pantalla por hoy!",
+        friendly:
+          "Hey! Ya usaste todo tu tiempo de pantalla. ¡Nos vemos mañana! 🌟",
+        strict:
+          "Tiempo de pantalla agotado. El acceso a aplicaciones está bloqueado.",
+      };
+
+      async function apiFetch(endpoint, options = {}) {
+        try {
+          const res = await fetch(endpoint, {
+            headers: { "Content-Type": "application/json", ...options.headers },
+            ...options,
+          });
+          return await res.json();
+        } catch (e) {
+          console.error("API Error:", e);
+          return null;
+        }
+      }
+
+      function formatDate(iso) {
+        if (!iso) return "Nunca";
+        const d = new Date(iso);
+        return d.toLocaleString("es-ES", {
+          dateStyle: "short",
+          timeStyle: "short",
+        });
+      }
+
+      function Toast({ message, type, visible }) {
+        return html`
+          <div
+            class=${`fixed bottom-6 right-6 glass-dark text-white px-5 py-3 rounded-2xl shadow-2xl transition-all duration-300 z-50 flex items-center gap-3 ${visible ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0"}`}
+          >
+            <i
+              class=${`fa-solid ${type === "success" ? "fa-check-circle text-emerald-400" : "fa-circle-exclamation text-rose-400"}`}
+            ></i>
+            <span class="text-sm">${message}</span>
+          </div>
+        `;
+      }
+
+      function LoadingOverlay({ visible }) {
+        return html`
+          <div class=${`loading-overlay${visible ? "" : " hidden"}`}>
+            <div class="spinner"></div>
+            <p class="text-sm text-slate-500 font-medium">
+              Cargando GuardianOS...
+            </p>
+          </div>
+        `;
+      }
+
+      function MainHeader({ status }) {
+        const dotColor =
+          status === "Conectado"
+            ? "bg-emerald-400 pulse-dot"
+            : status === "Desconectado"
+              ? "bg-rose-400"
+              : "bg-amber-400 pulse-dot";
+        const labelColor =
+          status === "Conectado"
+            ? "text-emerald-600"
+            : status === "Desconectado"
+              ? "text-rose-600"
+              : "text-amber-600";
+        return html`
+          <header
+            class="glass rounded-3xl px-5 py-3 flex items-center justify-between mb-6"
+          >
+            <div class="flex items-center gap-3">
+              <div
+                class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-cyan-400 flex items-center justify-center text-white shadow-lg shadow-violet-200"
+              >
+                <i class="fa-solid fa-shield"></i>
+              </div>
+              <div>
+                <span class="font-bold text-lg text-slate-800 tracking-tight"
+                  >GUARDIANOS</span
+                >
+                <p class="text-[10px] text-slate-400 leading-none mt-0.5">
+                  Panel de Control
+                </p>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span class=${`w-2 h-2 rounded-full ${dotColor}`}></span>
+              <span class=${`text-xs font-medium ${labelColor}`}
+                >${status}</span
+              >
+            </div>
+          </header>
+        `;
+      }
+
+      function StatCard({
+        iconClass,
+        iconBg,
+        iconColor,
+        label,
+        value,
+        dotClass,
+        statusText,
+      }) {
+        return html`
+          <div class="glass-card rounded-3xl p-5">
+            <div class="flex items-start justify-between mb-3">
+              <div class=${`stat-icon ${iconBg} ${iconColor}`}>
+                <i class=${`fa-solid ${iconClass}`}></i>
+              </div>
+            </div>
+            <p class="text-xs text-slate-500 mb-1 font-medium">${label}</p>
+            <h3 class="text-xl font-bold text-slate-800">${value}</h3>
+            <p class="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+              <span class=${`w-1.5 h-1.5 rounded-full ${dotClass}`}></span>
+              ${statusText}
+            </p>
+          </div>
+        `;
+      }
+
+      function DonutChart({ percent }) {
+        const circumference = 2 * Math.PI * 70;
+        const displayPercent = Math.min(100, Math.max(0, percent));
+        const offset = circumference - (displayPercent / 100) * circumference;
+        const textColor =
+          percent > 90
+            ? "text-rose-500"
+            : percent > 70
+              ? "text-amber-500"
+              : "text-slate-800";
+
+        return html`
+          <div class="relative flex-shrink-0">
+            <svg class="circular-chart" viewBox="0 0 180 180">
+              <circle
+                cx="90"
+                cy="90"
+                r="70"
+                fill="none"
+                stroke="#e2e8f0"
+                stroke-width="14"
+              />
+              <circle
+                cx="90"
+                cy="90"
+                r="70"
+                fill="none"
+                stroke="url(#donutGrad)"
+                stroke-width="14"
+                stroke-linecap="round"
+                stroke-dasharray=${circumference}
+                stroke-dashoffset=${offset}
+                transform="rotate(-90 90 90)"
+              />
+              <defs>
+                <linearGradient
+                  id="donutGrad"
+                  x1="0%"
+                  y1="0%"
+                  x2="100%"
+                  y2="100%"
+                >
+                  <stop offset="0%" style="stop-color:#8B5CF6" />
+                  <stop offset="100%" style="stop-color:#06B6D4" />
+                </linearGradient>
+              </defs>
+            </svg>
+            <div
+              class="absolute inset-0 flex flex-col items-center justify-center"
+            >
+              <span class=${`text-2xl font-bold ${textColor}`}
+                >${Math.round(percent)}%</span
+              >
+              <span class="text-[10px] text-slate-400">usado</span>
+            </div>
+          </div>
+        `;
+      }
+
+      function BarChart({ used, limit }) {
+        const canvasRef = useRef(null);
+        const chartRef = useRef(null);
+
+        useEffect(() => {
+          if (!canvasRef.current) return;
+          const ctx = canvasRef.current.getContext("2d");
+
+          if (chartRef.current) {
+            chartRef.current.destroy();
+            chartRef.current = null;
+          }
+
+          const simulatedData = [
+            Math.max(0, used * 0.7),
+            Math.max(0, used * 0.85),
+            used,
+            Math.max(0, limit * 0.9),
+            Math.max(0, limit * 0.6),
+            Math.max(0, limit * 0.75),
+            used,
+          ];
+          const labels = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+
+          chartRef.current = new Chart(ctx, {
+            type: "bar",
+            data: {
+              labels,
+              datasets: [
+                {
+                  label: "Minutos usados",
+                  data: simulatedData,
+                  backgroundColor: (context) => {
+                    const gradient = context.chart.ctx.createLinearGradient(
+                      0,
+                      0,
+                      0,
+                      180,
+                    );
+                    gradient.addColorStop(0, "rgba(139,92,246,0.7)");
+                    gradient.addColorStop(1, "rgba(6,182,212,0.4)");
+                    return gradient;
+                  },
+                  borderRadius: 8,
+                  borderSkipped: false,
+                  barThickness: 24,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  backgroundColor: "rgba(30,30,40,0.9)",
+                  padding: 10,
+                  cornerRadius: 10,
+                  titleFont: { family: "Inter", size: 12 },
+                  bodyFont: { family: "Inter", size: 12 },
+                },
+              },
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  max: Math.max(limit, 60),
+                  grid: { color: "rgba(0,0,0,0.04)", drawBorder: false },
+                  ticks: {
+                    font: { family: "Inter", size: 10 },
+                    color: "#94a3b8",
+                  },
+                },
+                x: {
+                  grid: { display: false },
+                  ticks: {
+                    font: { family: "Inter", size: 10 },
+                    color: "#94a3b8",
+                  },
+                },
+              },
+            },
+          });
+
+          return () => {
+            if (chartRef.current) {
+              chartRef.current.destroy();
+              chartRef.current = null;
+            }
+          };
+        }, [used, limit]);
+
+        return html`<canvas ref=${canvasRef} height="180"></canvas>`;
+      }
+
+      function UsageChartCard({ used, limit }) {
+        const percent = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+        return html`
+          <div class="glass-card rounded-3xl p-6">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h3 class="font-semibold text-slate-800">Uso de Tiempo</h3>
+                <p class="text-xs text-slate-500">
+                  Visualización del tiempo restante vs usado
+                </p>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-500 flex items-center gap-1">
+                  <span class="w-2 h-2 rounded-full bg-violet-400"></span>
+                  Usado
+                </span>
+                <span class="text-xs text-slate-500 flex items-center gap-1">
+                  <span class="w-2 h-2 rounded-full bg-cyan-400"></span>
+                  Restante
+                </span>
+              </div>
+            </div>
+            <div class="flex flex-col md:flex-row items-center gap-6">
+              <${DonutChart} percent=${percent} />
+              <div class="flex-1 w-full chart-container">
+                <${BarChart} used=${used} limit=${limit} />
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      function DeviceInfo({ usage, health }) {
+        const isOnline = health && health.status === "ok";
+        return html`
+          <div class="glass-card rounded-3xl p-6">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h3 class="font-semibold text-slate-800">
+                  Dispositivo Conectado
+                </h3>
+                <p class="text-xs text-slate-500">
+                  Información del último sync
+                </p>
+              </div>
+              <div
+                class=${`px-3 py-1 rounded-full text-xs font-medium ${isOnline ? "bg-emerald-100 text-emerald-600" : "bg-rose-100 text-rose-600"}`}
+              >
+                <span class="flex items-center gap-1.5">
+                  <span
+                    class=${`w-1.5 h-1.5 rounded-full ${isOnline ? "bg-emerald-400 pulse-dot" : "bg-rose-400"}`}
+                  ></span>
+                  ${isOnline ? "Online" : "Offline"}
+                </span>
+              </div>
+            </div>
+            <div class="flex items-center gap-4 p-4 rounded-2xl bg-white/30">
+              <div
+                class="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400 flex items-center justify-center text-white text-lg shadow-lg shadow-violet-200"
+              >
+                <i class="fa-solid fa-laptop"></i>
+              </div>
+              <div class="flex-1">
+                <p class="text-sm font-semibold text-slate-800">
+                  ${(usage && usage.deviceId) || "Desconocido"}
+                </p>
+                <p class="text-xs text-slate-500">
+                  Última sincronización: ${formatDate(usage && usage.lastSync)}
+                </p>
+              </div>
+              <div class="text-right">
+                <p class="text-xs text-slate-500">Tiempo acumulado</p>
+                <p class="text-sm font-bold text-slate-800">
+                  ${(usage && usage.elapsedMinutes) || 0} min
+                </p>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      function QuickControls({ enabled, onToggleEnabled }) {
+        const [notifications, setNotifications] = useState(true);
+        const [nightMode, setNightMode] = useState(false);
+
+        return html`
+          <div class="glass-card rounded-3xl p-6">
+            <h3 class="font-semibold text-slate-800 mb-1">Control Rápido</h3>
+            <p class="text-xs text-slate-500 mb-5">
+              Activa o desactiva funciones del sistema
+            </p>
+            <div class="space-y-3">
+              <div
+                class="flex items-center justify-between p-3 rounded-2xl bg-white/40"
+              >
+                <div class="flex items-center gap-3">
+                  <div
+                    class="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-100 to-purple-50 text-violet-600 flex items-center justify-center text-sm"
+                  >
+                    <i class="fa-solid fa-shield-halved"></i>
+                  </div>
+                  <div>
+                    <p class="text-sm font-medium text-slate-700">
+                      Protección Activada
+                    </p>
+                    <p class="text-[10px] text-slate-400">
+                      Bloqueo automático de apps
+                    </p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  class="toggle-switch"
+                  checked=${enabled}
+                  onChange=${onToggleEnabled}
+                />
+              </div>
+              <div
+                class="flex items-center justify-between p-3 rounded-2xl bg-white/40"
+              >
+                <div class="flex items-center gap-3">
+                  <div
+                    class="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-100 to-sky-50 text-cyan-600 flex items-center justify-center text-sm"
+                  >
+                    <i class="fa-solid fa-bell"></i>
+                  </div>
+                  <div>
+                    <p class="text-sm font-medium text-slate-700">
+                      Notificaciones
+                    </p>
+                    <p class="text-[10px] text-slate-400">
+                      Alertas cuando se acabe el tiempo
+                    </p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  class="toggle-switch"
+                  checked=${notifications}
+                  onChange=${(e) => setNotifications(e.target.checked)}
+                />
+              </div>
+              <div
+                class="flex items-center justify-between p-3 rounded-2xl bg-white/40"
+              >
+                <div class="flex items-center gap-3">
+                  <div
+                    class="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-100 to-teal-50 text-emerald-600 flex items-center justify-center text-sm"
+                  >
+                    <i class="fa-solid fa-moon"></i>
+                  </div>
+                  <div>
+                    <p class="text-sm font-medium text-slate-700">
+                      Modo Nocturno
+                    </p>
+                    <p class="text-[10px] text-slate-400">
+                      Reduce límite después de las 8pm
+                    </p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  class="toggle-switch"
+                  checked=${nightMode}
+                  onChange=${(e) => setNightMode(e.target.checked)}
+                />
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      function PresetsGrid({ onApply, onHelp }) {
+        return html`
+          <div class="glass-card rounded-3xl p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold text-slate-800">Modos Rápidos</h3>
+              <button
+                class="text-xs text-violet-600 font-medium hover:underline"
+                onClick=${onHelp}
+              >
+                ¿Qué son?
+              </button>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              ${PRESET_UI.map(
+                (p) => html`
+                  <div
+                    key=${p.key}
+                    class=${`preset-card p-4 rounded-2xl bg-gradient-to-br border ${p.bg}`}
+                    onClick=${() => onApply(p.key)}
+                  >
+                    <div
+                      class=${`w-8 h-8 rounded-xl ${p.iconBg} text-white flex items-center justify-center text-xs mb-2 shadow-md`}
+                    >
+                      <i class=${`fa-solid ${p.icon}`}></i>
+                    </div>
+                    <p class="text-xs font-semibold text-slate-700">
+                      ${p.label}
+                    </p>
+                    <p class="text-[10px] text-slate-500 mt-0.5">${p.sub}</p>
+                  </div>
+                `,
+              )}
+            </div>
+          </div>
+        `;
+      }
+
+      function TimeConfig({ timeLimit, onSave }) {
+        const [val, setVal] = useState(timeLimit || 0);
+        const [saving, setSaving] = useState(false);
+
+        useEffect(() => {
+          setVal(timeLimit || 0);
+        }, [timeLimit]);
+
+        const adjust = (delta) =>
+          setVal((v) => Math.max(0, Math.min(300, v + delta)));
+
+        const handleSave = async () => {
+          setSaving(true);
+          await onSave(val);
+          setSaving(false);
+        };
+
+        return html`
+          <div class="glass-card rounded-3xl p-6">
+            <h3 class="font-semibold text-slate-800 mb-1">
+              Configuración de Tiempo
+            </h3>
+            <p class="text-xs text-slate-500 mb-5">
+              Ajusta el límite diario de tiempo de pantalla
+            </p>
+            <div class="flex items-center gap-4 mb-4">
+              <button
+                onClick=${() => adjust(-5)}
+                class="w-10 h-10 rounded-xl glass flex items-center justify-center text-slate-600 hover:text-violet-600 hover:bg-white/60 transition-all"
+              >
+                <i class="fa-solid fa-minus"></i>
+              </button>
+              <div class="flex-1">
+                <div class="text-center">
+                  <span class="text-3xl font-bold gradient-text">${val}</span>
+                  <span class="text-sm text-slate-500"> min</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="300"
+                  value=${val}
+                  class="w-full mt-2 accent-violet-500"
+                  onInput=${(e) => setVal(parseInt(e.target.value))}
+                />
+                <div
+                  class="flex justify-between text-[10px] text-slate-400 mt-1"
+                >
+                  <span>0 min</span>
+                  <span>150 min</span>
+                  <span>300 min</span>
+                </div>
+              </div>
+              <button
+                onClick=${() => adjust(5)}
+                class="w-10 h-10 rounded-xl glass flex items-center justify-center text-slate-600 hover:text-violet-600 hover:bg-white/60 transition-all"
+              >
+                <i class="fa-solid fa-plus"></i>
+              </button>
+            </div>
+            <button
+              onClick=${handleSave}
+              disabled=${saving}
+              class="w-full py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-cyan-500 text-white text-sm font-medium shadow-lg shadow-violet-200 hover:shadow-xl hover:shadow-violet-200 transition-all active:scale-[0.98]"
+            >
+              ${saving ? "Guardando..." : "Guardar Límite de Tiempo"}
+            </button>
+          </div>
+        `;
+      }
+
+      function MessageConfig({ blockMessage, onSave }) {
+        const [msg, setMsg] = useState(blockMessage || "");
+        const [saving, setSaving] = useState(false);
+
+        useEffect(() => {
+          setMsg(blockMessage || "");
+        }, [blockMessage]);
+
+        const handleSave = async () => {
+          setSaving(true);
+          await onSave(msg);
+          setSaving(false);
+        };
+
+        return html`
+          <div class="glass-card rounded-3xl p-6">
+            <h3 class="font-semibold text-slate-800 mb-1">
+              Mensaje de Bloqueo
+            </h3>
+            <p class="text-xs text-slate-500 mb-5">
+              Personaliza lo que ve el usuario al bloquear apps
+            </p>
+            <div class="space-y-4">
+              <div>
+                <label class="text-xs font-medium text-slate-600 mb-1.5 block"
+                  >Mensaje personalizado</label
+                >
+                <textarea
+                  rows="3"
+                  class="w-full rounded-xl bg-white/40 border border-white/50 p-3 text-sm text-slate-700 outline-none focus:border-violet-300 focus:ring-2 focus:ring-violet-100 transition-all resize-none"
+                  placeholder="Escribe el mensaje de bloqueo..."
+                  value=${msg}
+                  onInput=${(e) => setMsg(e.target.value)}
+                ></textarea>
+              </div>
+              <div class="flex gap-2">
+                <button
+                  onClick=${() => setMsg(QUICK_MESSAGES.default)}
+                  class="px-3 py-1.5 rounded-lg text-[11px] bg-white/40 hover:bg-white/60 text-slate-600 transition-colors border border-white/50"
+                >
+                  Por defecto
+                </button>
+                <button
+                  onClick=${() => setMsg(QUICK_MESSAGES.friendly)}
+                  class="px-3 py-1.5 rounded-lg text-[11px] bg-white/40 hover:bg-white/60 text-slate-600 transition-colors border border-white/50"
+                >
+                  Amigable
+                </button>
+                <button
+                  onClick=${() => setMsg(QUICK_MESSAGES.strict)}
+                  class="px-3 py-1.5 rounded-lg text-[11px] bg-white/40 hover:bg-white/60 text-slate-600 transition-colors border border-white/50"
+                >
+                  Estricto
+                </button>
+              </div>
+              <button
+                onClick=${handleSave}
+                disabled=${saving}
+                class="w-full py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-cyan-500 text-white text-sm font-medium shadow-lg shadow-violet-200 hover:shadow-xl hover:shadow-violet-200 transition-all active:scale-[0.98]"
+              >
+                ${saving ? "Guardando..." : "Guardar Mensaje"}
+              </button>
+            </div>
+          </div>
+        `;
+      }
+
+      function BlockedAppsList({ apps }) {
+        return html`
+          <div class="glass-card rounded-3xl p-6 mt-6">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h3 class="font-semibold text-slate-800">
+                  Aplicaciones Bloqueadas
+                </h3>
+                <p class="text-xs text-slate-500">
+                  Apps que se cierran automáticamente al agotarse el tiempo
+                </p>
+              </div>
+              <span
+                class="px-3 py-1 rounded-full text-xs font-medium bg-rose-100 text-rose-600"
+                >${apps.length} apps</span
+              >
+            </div>
+            <div class="flex flex-wrap gap-2">
+              ${apps.length === 0
+                ? html`<p class="text-sm text-slate-400">
+                    No hay aplicaciones bloqueadas configuradas.
+                  </p>`
+                : apps.map(
+                    (app, i) => html`
+                      <span
+                        key=${i}
+                        class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white/50 text-slate-600 border border-white/60 capitalize"
+                        >${app}</span
+                      >
+                    `,
+                  )}
+            </div>
+          </div>
+        `;
+      }
+
+      function Footer() {
+        return html`
+          <div class="text-center py-6 text-xs text-slate-400">
+            GuardianOS Dashboard · v1.0
+          </div>
+        `;
+      }
+
+      function App() {
+        const [config, setConfig] = useState({});
+        const [usage, setUsage] = useState({});
+        const [health, setHealth] = useState(null);
+        const [loading, setLoading] = useState(true);
+        const [status, setStatus] = useState("Conectando...");
+        const [toast, setToast] = useState({
+          message: "",
+          type: "success",
+          visible: false,
+        });
+
+        const showToast = useCallback((message, type = "success") => {
+          setToast({ message, type, visible: true });
+          setTimeout(() => setToast((t) => ({ ...t, visible: false })), 3000);
+        }, []);
+
+        const loadData = useCallback(async () => {
+          const [configData, usageData, healthData] = await Promise.all([
+            apiFetch("/config"),
+            apiFetch("/usage"),
+            apiFetch("/health"),
+          ]);
+
+          setLoading(false);
+
+          if (!configData) {
+            setStatus("Desconectado");
+            return;
+          }
+
+          setConfig(configData);
+          setUsage(usageData || {});
+          setHealth(healthData);
+          setStatus("Conectado");
+        }, []);
+
+        useEffect(() => {
+          loadData();
+          const interval = setInterval(loadData, 10000);
+          return () => clearInterval(interval);
+        }, [loadData]);
+
+        const handleToggleEnabled = useCallback(
+          async (e) => {
+            const checked = e.target.checked;
+            const res = await apiFetch("/setEnabled", {
+              method: "POST",
+              body: JSON.stringify({ enabled: checked }),
+            });
+            if (res && res.success) {
+              showToast(
+                checked ? "Protección activada" : "Protección desactivada",
+              );
+              setConfig((c) => ({ ...c, Enabled: checked }));
+            }
+          },
+          [showToast],
+        );
+
+        const handleSaveTime = useCallback(
+          async (val) => {
+            const res = await apiFetch("/setTime", {
+              method: "POST",
+              body: JSON.stringify({ timeLimitMinutes: val }),
+            });
+            if (res && res.success) {
+              showToast("Límite actualizado a " + val + " min");
+              await loadData();
+            }
+          },
+          [showToast, loadData],
+        );
+
+        const handleSaveMsg = useCallback(
+          async (msg) => {
+            const res = await apiFetch("/setMessage", {
+              method: "POST",
+              body: JSON.stringify({ blockMessage: msg }),
+            });
+            if (res && res.success) {
+              showToast("Mensaje de bloqueo actualizado");
+            }
+          },
+          [showToast],
+        );
+
+        const handlePreset = useCallback(
+          async (key) => {
+            const p = PRESETS[key];
+            if (!p) return;
+            await Promise.all([
+              apiFetch("/setTime", {
+                method: "POST",
+                body: JSON.stringify({ timeLimitMinutes: p.time }),
+              }),
+              apiFetch("/setEnabled", {
+                method: "POST",
+                body: JSON.stringify({ enabled: p.enabled }),
+              }),
+              apiFetch("/setMessage", {
+                method: "POST",
+                body: JSON.stringify({ blockMessage: p.message }),
+              }),
+            ]);
+            showToast("Modo aplicado correctamente");
+            await loadData();
+          },
+          [showToast, loadData],
+        );
+
+        const limit = config.TimeLimitMinutes || 0;
+        const used = usage.elapsedMinutes || 0;
+        const remaining = Math.max(0, limit - used);
+        const apps = config.BlockedApps || [];
+        const remDot =
+          remaining <= 0
+            ? "bg-rose-400 pulse-dot"
+            : remaining < 10
+              ? "bg-amber-400 pulse-dot"
+              : "bg-emerald-400";
+        const remText =
+          remaining <= 0
+            ? "Tiempo agotado"
+            : remaining < 10
+              ? "Casi agotado"
+              : "Disponible";
+
+        return html`
+        <${Fragment}>
+          <${LoadingOverlay} visible=${loading} />
+
+          <main class="px-4 md:px-8 py-4 md:py-6 max-w-[1400px] mx-auto">
+
+            <${MainHeader} status=${status} />
+
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <${StatCard}
+                iconClass="fa-hourglass-half"
+                iconBg="bg-gradient-to-br from-violet-100 to-purple-50"
+                iconColor="text-violet-600"
+                label="Límite de Tiempo"
+                value=${limit + " min"}
+                dotClass="bg-emerald-400 pulse-dot"
+                statusText="Configurado"
+              />
+              <${StatCard}
+                iconClass="fa-stopwatch"
+                iconBg="bg-gradient-to-br from-cyan-100 to-sky-50"
+                iconColor="text-cyan-600"
+                label="Tiempo Usado"
+                value=${used + " min"}
+                dotClass="bg-rose-400"
+                statusText="Hoy"
+              />
+              <${StatCard}
+                iconClass="fa-hourglass-start"
+                iconBg="bg-gradient-to-br from-emerald-100 to-teal-50"
+                iconColor="text-emerald-600"
+                label="Tiempo Restante"
+                value=${remaining + " min"}
+                dotClass=${remDot}
+                statusText=${remText}
+              />
+              <${StatCard}
+                iconClass="fa-ban"
+                iconBg="bg-gradient-to-br from-rose-100 to-pink-50"
+                iconColor="text-rose-600"
+                label="Apps Bloqueadas"
+                value=${apps.length}
+                dotClass="bg-rose-400"
+                statusText="Protegidas"
+              />
+            </div>
+
+            <div class="grid lg:grid-cols-3 gap-6">
+              <div class="lg:col-span-2 space-y-6">
+                <${UsageChartCard} used=${used} limit=${limit} />
+                <${DeviceInfo} usage=${usage} health=${health} />
+              </div>
+              <div class="space-y-6">
+                <${QuickControls} enabled=${!!config.Enabled} onToggleEnabled=${handleToggleEnabled} />
+                <${PresetsGrid}
+                  onApply=${handlePreset}
+                  onHelp=${() => showToast("Selecciona un modo para aplicar configuración rápida")}
+                />
+              </div>
+            </div>
+
+            <div class="grid lg:grid-cols-2 gap-6 mt-6">
+              <${TimeConfig} timeLimit=${limit} onSave=${handleSaveTime} />
+              <${MessageConfig} blockMessage=${config.BlockMessage || ""} onSave=${handleSaveMsg} />
+            </div>
+
+            <${BlockedAppsList} apps=${apps} />
+
+            <${Footer} />
+
+          </main>
+
+          <${Toast} message=${toast.message} type=${toast.type} visible=${toast.visible} />
+        </${Fragment}>
+      `;
+      }
+
+      render(html`<${App} />`, document.getElementById("app"));
+    </script>
+  </body>
+</html>

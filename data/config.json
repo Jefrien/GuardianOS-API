@@ -1,7 +1,7 @@
 {
-  "TimeLimitMinutes": 35,
+  "TimeLimitMinutes": 120,
   "Enabled": true,
-  "BlockMessage": "¡Se acabó el tiempo de pantalla por hoy!",
+  "BlockMessage": "Hey! Ya usaste todo tu tiempo de pantalla. ¡Nos vemos mañana! 🌟",
   "BlockedApps": [
     "chrome",
     "firefox",
