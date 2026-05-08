@@ -13,6 +13,7 @@
   "license": "ISC",
   "dependencies": {
     "@hono/node-server": "^2.0.1",
+    "dotenv": "^17.4.2",
     "hono": "^4.7.7"
   }
 }
