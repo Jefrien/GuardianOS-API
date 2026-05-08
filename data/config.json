@@ -1,0 +1,17 @@
+{
+  "TimeLimitMinutes": 35,
+  "Enabled": true,
+  "BlockMessage": "¡Se acabó el tiempo de pantalla por hoy!",
+  "BlockedApps": [
+    "chrome",
+    "firefox",
+    "msedge",
+    "opera",
+    "brave",
+    "discord",
+    "steam",
+    "epicgameslauncher",
+    "minecraft",
+    "roblox"
+  ]
+}
